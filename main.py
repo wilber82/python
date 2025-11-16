@@ -1,13 +1,9 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import lgpio
-import asyncio
-import io
-import os
 from PIL import Image
 from picamera2 import Picamera2
-
+import lgpio, psutil, asyncio,io,os
 
 app = FastAPI()
 
@@ -21,7 +17,7 @@ app.add_middleware(
 
 # GPIO setup
 GPIO_CHIP = 0  # Usually 0 for Raspberry Pi
-LED_PIN = 17  # GPIO pin 17 for LED
+LED_PIN = 18  # GPIO pin 17 for LED
 h = lgpio.gpiochip_open(GPIO_CHIP)
 lgpio.gpio_claim_output(h, LED_PIN)
 
@@ -73,6 +69,11 @@ async def video_stream():
             
             # Encode to JPEG using PIL
             image = Image.fromarray(frame)
+            
+            # Convert RGBA to RGB if necessary
+            if image.mode == 'RGBA':
+                image = image.convert('RGB')
+            
             buffer = io.BytesIO()
             image.save(buffer, format='JPEG')
             frame_bytes = buffer.getvalue()
@@ -89,21 +90,37 @@ async def websocket_status(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
+            try:
+                cpu_usage = await asyncio.to_thread(psutil.cpu_percent, interval=1)
+                mem = psutil.virtual_memory()
+                disk = psutil.disk_usage('/')
+                mem_usage = mem.percent
+                disk_usage = disk.percent
+            except OSError:
+                cpu_usage = 0.0
             # Send status every 2 seconds
             status = {
                 "led": "on" if led_state else "off",
                 "timestamp": asyncio.get_event_loop().time(),
-                "cpu_usage": os.getloadavg()[0],
+                "cpu_usage": cpu_usage,
                 "cpu_cores": os.cpu_count(),
                 "cpu_model": os.uname().machine,
-                "cpu_temp": os.popen("vcgencmd measure_temp").readline().replace("temp=","").replace("'C\n","")
+                "cpu_temp": os.popen("vcgencmd measure_temp").readline().replace("temp=","").replace("'C\n",""),
+                "memory_usage": mem_usage,
+                "disk_usage": disk_usage
             }
             await websocket.send_json(status)
             await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        print("WebSocket client disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except RuntimeError:
+            # close already sent, ignore
+            pass
 
 
 # Cleanup on shutdown
