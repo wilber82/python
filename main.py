@@ -94,7 +94,7 @@ async def websocket_status(websocket: WebSocket):
                 cpu_usage = await asyncio.to_thread(psutil.cpu_percent, interval=1)
                 mem = psutil.virtual_memory()
                 disk = psutil.disk_usage('/')
-                mem_usage = mem.percent
+                mem_usage = round(100 - mem.percent, 2)
                 disk_usage = disk.percent
             except OSError:
                 cpu_usage = 0.0
