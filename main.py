@@ -5,8 +5,7 @@ import lgpio
 import asyncio
 import io
 import os
-import cv2
-import numpy as np
+from PIL import Image
 from picamera2 import Picamera2
 
 
@@ -55,7 +54,6 @@ async def control_led(state: str):
 async def get_led_status():
     return {"led": "on" if led_state else "off"}
 
-
 # REST endpoint: Capture single image
 @app.get("/camera/capture")
 async def capture_image():
@@ -64,18 +62,20 @@ async def capture_image():
     camera.capture_file(stream, format='png')
     stream.seek(0)
     
-    return StreamingResponse(stream, media_type="image/jpeg")
+    return StreamingResponse(stream, media_type="image/png")
 
 @app.get("/camera/stream")
 async def video_stream():
     def generate():
         while True:
-            # Capture frame from camera
+            # Capture frame as array
             frame = camera.capture_array()
             
-            # Convert to JPEG
-            _, buffer = cv2.imencode('.jpg', frame)
-            frame_bytes = buffer.tobytes()
+            # Encode to JPEG using PIL
+            image = Image.fromarray(frame)
+            buffer = io.BytesIO()
+            image.save(buffer, format='JPEG')
+            frame_bytes = buffer.getvalue()
             
             # Yield frame in multipart format
             yield (b'--frame\r\n'
@@ -92,10 +92,14 @@ async def websocket_status(websocket: WebSocket):
             # Send status every 2 seconds
             status = {
                 "led": "on" if led_state else "off",
-                "timestamp": asyncio.get_event_loop().time()
+                "timestamp": asyncio.get_event_loop().time(),
+                "cpu_usage": os.getloadavg()[0],
+                "cpu_cores": os.cpu_count(),
+                "cpu_model": os.uname().machine,
+                "cpu_temp": os.popen("vcgencmd measure_temp").readline().replace("temp=","").replace("'C\n","")
             }
             await websocket.send_json(status)
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
