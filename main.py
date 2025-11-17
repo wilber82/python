@@ -92,10 +92,9 @@ async def websocket_status(websocket: WebSocket):
         while True:
             try:
                 cpu_usage = await asyncio.to_thread(psutil.cpu_percent, interval=1)
+                cpu_frequency = psutil.cpu_freq()
                 mem = psutil.virtual_memory()
                 disk = psutil.disk_usage('/')
-                mem_usage = round(100 - mem.percent, 2)
-                disk_usage = disk.percent
             except OSError:
                 cpu_usage = 0.0
             # Send status every 2 seconds
@@ -106,8 +105,12 @@ async def websocket_status(websocket: WebSocket):
                 "cpu_cores": os.cpu_count(),
                 "cpu_model": os.uname().machine,
                 "cpu_temp": os.popen("vcgencmd measure_temp").readline().replace("temp=","").replace("'C\n",""),
-                "memory_usage": mem_usage,
-                "disk_usage": disk_usage
+                "memory_usage": mem.percent,
+                "memory_total": (mem.total / 1024 ** 3).__round__(2),  # in GB
+                "memory_available": (mem.available / 1024 ** 3).__round__(2),  # in GB
+                "disk_usage": disk.percent,
+                "disk_total": (disk.total / 1024 ** 3).__round__(2),  # in GB
+                "disk_free": (disk.free / 1024 ** 3).__round__(2),  # in GB
             }
             await websocket.send_json(status)
             await asyncio.sleep(1)
